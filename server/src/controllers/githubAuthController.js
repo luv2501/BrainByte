@@ -3,10 +3,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
-const GITHUB_CALLBACK_URL = process.env.GITHUB_CALLBACK_URL;
+
 
 const generateToken = (id) => {
   const secret = process.env.JWT_SECRET || "brainbyte_jwt_default_secret_key";
@@ -21,6 +18,9 @@ const generateToken = (id) => {
  * Stores a random `state` value in a short-lived httpOnly cookie to prevent CSRF.
  */
 export const githubLogin = (req, res) => {
+  const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+  const GITHUB_CALLBACK_URL = process.env.GITHUB_CALLBACK_URL;
+
   const state = crypto.randomBytes(16).toString("hex");
 
   // Store state in a short-lived httpOnly cookie (10 minutes)
@@ -53,13 +53,24 @@ export const githubLogin = (req, res) => {
  * 5. Issue BrainByte JWT and redirect frontend to /auth/github/success?token=...
  */
 export const githubCallback = async (req, res) => {
-  const errorRedirect = `${CLIENT_URL}/login?error=github_failed`;
+  const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+  const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+  const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+  const GITHUB_CALLBACK_URL = process.env.GITHUB_CALLBACK_URL;
+
 
   try {
     const { code, state } = req.query;
 
     // ── 1. CSRF state check ──────────────────────────────────────────────────
     const storedState = req.cookies?.github_oauth_state;
+    console.log("[GitHub OAuth Diagnostic] Step 1 - State check:", {
+      queryStateReceived: Boolean(state),
+      cookiePresent: Boolean(storedState),
+      stateMatch: Boolean(state && storedState && state === storedState),
+      cookiesReceived: Object.keys(req.cookies || {}),
+    });
+
     res.clearCookie("github_oauth_state", { httpOnly: true, sameSite: "lax" });
 
     if (!state || !storedState || state !== storedState) {
@@ -71,6 +82,7 @@ export const githubCallback = async (req, res) => {
       console.error("[GitHub OAuth] No code received from GitHub.");
       return res.redirect(errorRedirect);
     }
+    console.log("[GitHub OAuth Diagnostic] Step 1 - Code received: true");
 
     // ── 2. Exchange code for access token ────────────────────────────────────
     let accessToken;
@@ -89,13 +101,20 @@ export const githubCallback = async (req, res) => {
         }
       );
 
+      console.log("[GitHub OAuth Diagnostic] Step 2 - Token exchange response status:", tokenRes.status, {
+        hasAccessToken: Boolean(tokenRes.data?.access_token),
+        tokenType: tokenRes.data?.token_type || null,
+        error: tokenRes.data?.error || null,
+        error_description: tokenRes.data?.error_description || null,
+      });
+
       accessToken = tokenRes.data.access_token;
       if (!accessToken) {
         console.error("[GitHub OAuth] Token exchange failed:", tokenRes.data);
         return res.redirect(errorRedirect);
       }
     } catch (err) {
-      console.error("[GitHub OAuth] Token exchange error:", err.message);
+      console.error("[GitHub OAuth] Token exchange error:", err.message, err.response?.data || "");
       return res.redirect(errorRedirect);
     }
 
@@ -111,9 +130,13 @@ export const githubCallback = async (req, res) => {
         headers: ghHeaders,
         timeout: 10000,
       });
+      console.log("[GitHub OAuth Diagnostic] Step 3 - Profile fetch status:", profileRes.status, {
+        hasProfileId: Boolean(profileRes.data?.id),
+        hasProfileEmail: Boolean(profileRes.data?.email),
+      });
       profile = profileRes.data;
     } catch (err) {
-      console.error("[GitHub OAuth] Profile fetch error:", err.message);
+      console.error("[GitHub OAuth] Profile fetch error:", err.message, err.response?.data || "");
       return res.redirect(errorRedirect);
     }
 
@@ -129,12 +152,17 @@ export const githubCallback = async (req, res) => {
           "https://api.github.com/user/emails",
           { headers: ghHeaders, timeout: 10000 }
         );
+        console.log("[GitHub OAuth Diagnostic] Step 4 - Emails fetch status:", emailsRes.status, {
+          emailsCount: Array.isArray(emailsRes.data) ? emailsRes.data.length : 0,
+        });
         const primary = emailsRes.data.find((e) => e.primary && e.verified);
         email = primary?.email || null;
       } catch (err) {
-        console.error("[GitHub OAuth] Email fetch error:", err.message);
+        console.error("[GitHub OAuth] Email fetch error:", err.message, err.response?.data || "");
       }
     }
+
+    console.log("[GitHub OAuth Diagnostic] Step 4 - Email resolved:", Boolean(email));
 
     if (!email) {
       console.error("[GitHub OAuth] Could not obtain a verified email for user:", githubId);
@@ -145,10 +173,12 @@ export const githubCallback = async (req, res) => {
 
     // ── 5. Find or create BrainByte user ─────────────────────────────────────
     let user = await User.findOne({ githubId });
+    console.log("[GitHub OAuth Diagnostic] Step 5 - Existing user with githubId found:", Boolean(user));
 
     if (!user) {
       // Try linking to an existing account with the same email (Google or email/password)
       user = await User.findOne({ email: normalizedEmail });
+      console.log("[GitHub OAuth Diagnostic] Step 5 - Existing user with email found to link:", Boolean(user));
 
       if (user) {
         // Link GitHub to the existing account
@@ -157,6 +187,7 @@ export const githubCallback = async (req, res) => {
           user.avatarUrl = picture;
         }
         await user.save();
+        console.log("[GitHub OAuth Diagnostic] Step 5 - Account linked successfully");
       } else {
         // Brand-new user — create account from GitHub profile
         const baseUsername = name
@@ -178,6 +209,10 @@ export const githubCallback = async (req, res) => {
           avatarUrl: picture,
           // No password — OAuth-only account
         });
+        console.log("[GitHub OAuth Diagnostic] Step 5 - New user created successfully:", {
+          hasUserId: Boolean(user._id),
+          usernameLength: username.length,
+        });
       }
     }
 
@@ -195,11 +230,14 @@ export const githubCallback = async (req, res) => {
       streak: String(user.streak || 0),
     });
 
+    const maskedRedirect = `${CLIENT_URL}/auth/github/success?token=***MASKED***&_id=${String(user._id)}&username=${user.username}`;
+    console.log("[GitHub OAuth Diagnostic] Step 6 - Final redirect URL:", maskedRedirect);
+
     return res.redirect(
       `${CLIENT_URL}/auth/github/success?${successParams.toString()}`
     );
   } catch (error) {
-    console.error("[GitHub OAuth] Unexpected error:", error.message);
+    console.error("[GitHub OAuth Diagnostic] Caught error in callback:", error.message, error.stack);
     return res.redirect(errorRedirect);
   }
 };

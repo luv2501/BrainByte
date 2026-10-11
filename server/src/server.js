@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
+console.log("ENV CHECK:", !!process.env.GITHUB_CLIENT_ID, !!process.env.GITHUB_CALLBACK_URL, process.cwd());
 
 import app from "./app.js";
 import connectDB from "./config/db.js";
