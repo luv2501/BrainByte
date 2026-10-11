@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" fill="none">
+  <defs>
+    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4b4b"/>
+      <stop offset="100%" stop-color="#dc2626"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Left Glitch Accents (Cyan & Red) -->
+  <rect x="18" y="45" width="22" height="4" rx="2" fill="#06b6d4" opacity="0.9" />
+  <rect x="10" y="60" width="30" height="4.5" rx="2" fill="#ef4444" opacity="0.95" />
+  <rect x="22" y="75" width="18" height="4" rx="2" fill="#06b6d4" opacity="0.8" />
+  <rect x="15" y="90" width="25" height="4" rx="2" fill="#ef4444" opacity="0.85" />
+
+  <!-- Right Glitch Accents (Cyan & Red) -->
+  <rect x="160" y="48" width="22" height="4" rx="2" fill="#ef4444" opacity="0.9" />
+  <rect x="155" y="62" width="35" height="4.5" rx="2" fill="#06b6d4" opacity="0.95" />
+  <rect x="162" y="78" width="24" height="4" rx="2" fill="#ef4444" opacity="0.85" />
+  <rect x="158" y="92" width="26" height="4" rx="2" fill="#06b6d4" opacity="0.8" />
+
+  <!-- Main Cyber Brain / Circuit Labyrinth Structure -->
+  <g stroke="url(#silverGrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <!-- Top Central Arch -->
+    <path d="M75 25 C85 20, 115 20, 125 25" />
+    
+    <!-- Left Hemisphere Main Tracks -->
+    <path d="M70 26 C50 32, 42 50, 42 70 C42 95, 55 115, 80 125 L80 135 C70 135, 60 130, 55 125" />
+    <path d="M55 45 L78 45 L78 65 L60 65 L60 85 L85 85" />
+    <path d="M62 105 L82 105 L82 85" />
+    <path d="M72 65 L95 65 L95 40 L80 40" />
+    <path d="M92 25 L92 50 L80 50" />
+    <path d="M95 80 L95 120 L85 120" />
+
+    <!-- Central Stem & Divider -->
+    <path d="M100 35 L100 138" stroke="#ffffff" stroke-width="6" />
+
+    <!-- Right Hemisphere Main Tracks -->
+    <path d="M130 26 C150 32, 158 50, 158 70 C158 95, 145 115, 120 125 L120 135 C130 135, 140 130, 145 125" />
+    <path d="M145 45 L122 45 L122 65 L140 65 L140 85 L115 85" />
+    <path d="M138 105 L118 105 L118 85" />
+    <path d="M128 65 L105 65 L105 40 L120 40" />
+    <path d="M108 25 L108 50 L120 50" />
+    <path d="M105 80 L105 120 L115 120" />
+  </g>
+
+  <!-- Glowing Circuit Nodes -->
+  <circle cx="100" cy="140" r="4" fill="#ef4444" />
+  <circle cx="55" cy="45" r="3" fill="#06b6d4" />
+  <circle cx="145" cy="45" r="3" fill="#ef4444" />
+  <circle cx="85" cy="85" r="3" fill="#ffffff" />
+  <circle cx="115" cy="85" r="3" fill="#ffffff" />
+</svg>
+
