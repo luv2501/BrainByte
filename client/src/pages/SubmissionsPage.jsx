@@ -43,7 +43,7 @@ export default function SubmissionsPage() {
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white flex items-center gap-2">
               <FileCheck2 className="w-7 h-7 text-[#ff3b3b]" />
               <span>Submission History</span>
             </h1>

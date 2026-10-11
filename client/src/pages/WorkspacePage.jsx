@@ -1,30 +1,26 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import Editor from "@monaco-editor/react";
 import confetti from "canvas-confetti";
 import { problemApi } from "../api/problemApi.js";
 import { submissionApi } from "../api/submissionApi.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import BrainByteLogo from "../components/common/BrainByteLogo.jsx";
 import { DifficultyBadge, VerdictBadge } from "../components/common/Badge.jsx";
+import WorkspaceEditor from "../components/editor/WorkspaceEditor.jsx";
+import WorkspaceConsole from "../components/editor/WorkspaceConsole.jsx";
 import AIAssistantDrawer from "../components/editor/AIAssistantDrawer.jsx";
 import {
   Play,
   Send,
   Sparkles,
   ChevronLeft,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Cpu,
-  Terminal,
   FileText,
   History,
   Lightbulb,
-  Zap,
-  Flame,
   Maximize2,
+  Minimize2,
   RotateCcw,
+  Sliders,
+  ChevronRight,
 } from "lucide-react";
 
 export default function WorkspacePage() {
@@ -50,6 +46,24 @@ export default function WorkspacePage() {
   const [executionResult, setExecutionResult] = useState(null);
   const [submissionHistory, setSubmissionHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Layout states (resizable panels & fullscreen editor)
+  const [leftWidthPercent, setLeftWidthPercent] = useState(() => {
+    const saved = localStorage.getItem("brainbyte_workspace_split");
+    return saved ? parseFloat(saved) : 45;
+  });
+  const [consoleHeightPx, setConsoleHeightPx] = useState(() => {
+    const saved = localStorage.getItem("brainbyte_console_height");
+    return saved ? parseInt(saved, 10) : 260;
+  });
+  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+  const [isConsoleCollapsed, setIsConsoleCollapsed] = useState(false);
+
+  // Dragging states
+  const isDraggingHorizontal = useRef(false);
+  const isDraggingVertical = useRef(false);
+  const workspaceContainerRef = useRef(null);
+  const rightPaneRef = useRef(null);
 
   // AI Assistant drawer
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
@@ -102,6 +116,15 @@ export default function WorkspacePage() {
     }
   };
 
+  const handleResetLayout = () => {
+    setLeftWidthPercent(45);
+    setConsoleHeightPx(260);
+    setIsEditorMaximized(false);
+    setIsConsoleCollapsed(false);
+    localStorage.removeItem("brainbyte_workspace_split");
+    localStorage.removeItem("brainbyte_console_height");
+  };
+
   // Fetch user submission history for this problem
   const fetchSubmissionHistory = async () => {
     if (!problem?._id) return;
@@ -122,6 +145,61 @@ export default function WorkspacePage() {
     }
   }, [activeLeftTab, problem]);
 
+  // Panel Resizing logic (Smooth Draggable Dividers)
+  const handleMouseDownH = useCallback((e) => {
+    e.preventDefault();
+    isDraggingHorizontal.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  const handleMouseDownV = useCallback((e) => {
+    e.preventDefault();
+    isDraggingVertical.current = true;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      // Horizontal split (between left description and right editor)
+      if (isDraggingHorizontal.current && workspaceContainerRef.current) {
+        const containerRect = workspaceContainerRef.current.getBoundingClientRect();
+        const newLeftWidth = e.clientX - containerRect.left;
+        const totalWidth = containerRect.width;
+        let percentage = (newLeftWidth / totalWidth) * 100;
+        percentage = Math.max(20, Math.min(80, percentage));
+        setLeftWidthPercent(percentage);
+        localStorage.setItem("brainbyte_workspace_split", percentage.toFixed(1));
+      }
+
+      // Vertical split (between editor and bottom console)
+      if (isDraggingVertical.current && rightPaneRef.current) {
+        const rightRect = rightPaneRef.current.getBoundingClientRect();
+        const newConsoleHeight = rightRect.bottom - e.clientY;
+        const clampedHeight = Math.max(100, Math.min(rightRect.height - 120, newConsoleHeight));
+        setConsoleHeightPx(clampedHeight);
+        localStorage.setItem("brainbyte_console_height", String(clampedHeight));
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isDraggingHorizontal.current || isDraggingVertical.current) {
+        isDraggingHorizontal.current = false;
+        isDraggingVertical.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
   // Quick Run against sample visible test cases (Zero DB writes)
   const handleRun = async () => {
     if (!code || !code.trim()) return;
@@ -129,6 +207,7 @@ export default function WorkspacePage() {
     try {
       setRunning(true);
       setActiveConsoleTab("result");
+      setIsConsoleCollapsed(false);
       setExecutionResult(null);
 
       let payload = {
@@ -166,6 +245,7 @@ export default function WorkspacePage() {
     try {
       setSubmitting(true);
       setActiveConsoleTab("result");
+      setIsConsoleCollapsed(false);
       setExecutionResult(null);
 
       const data = await submissionApi.submitCode({
@@ -199,11 +279,15 @@ export default function WorkspacePage() {
           colors: ["#ef4444", "#06b6d4", "#f59e0b", "#ffffff"],
         });
 
-        if (data.firstTimeSolved) {
-          updateUserStats({
-            xp: (user?.xp || 0) + data.xpAwarded,
-            streak: (user?.streak || 0) + 1,
-          });
+        const updatedStats = {};
+        if (data.firstTimeSolved && data.xpAwarded) {
+          updatedStats.xp = (user?.xp || 0) + data.xpAwarded;
+        }
+        if (typeof data.streak === "number") {
+          updatedStats.streak = data.streak;
+        }
+        if (Object.keys(updatedStats).length > 0) {
+          updateUserStats(updatedStats);
         }
       }
 
@@ -251,37 +335,47 @@ export default function WorkspacePage() {
   return (
     <div className="h-screen flex flex-col bg-[#08090c] text-slate-200 overflow-hidden font-sans">
       {/* Top Workspace Action Header */}
-      <header className="h-14 px-4 border-b border-white/[0.08] bg-[#0c0d12] flex items-center justify-between shrink-0 z-30">
+      <header className="h-14 px-4 border-b border-white/[0.08] bg-[#0c0d13] flex items-center justify-between shrink-0 z-30 select-none">
         {/* Left: Navigation & Problem Title */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <Link
             to="/problems"
-            className="flex items-center gap-1 text-xs font-mono text-slate-400 hover:text-white transition-colors"
+            className="flex items-center gap-1 text-xs font-mono text-slate-400 hover:text-white transition-colors shrink-0"
           >
             <ChevronLeft className="w-4 h-4" />
-            <span>Problems</span>
+            <span className="hidden sm:inline">Problems</span>
           </Link>
 
-          <div className="h-4 w-[1px] bg-white/[0.1]" />
+          <div className="h-4 w-[1px] bg-white/[0.1] shrink-0" />
 
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-sm font-bold text-white max-w-[200px] sm:max-w-md truncate">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <h1 className="text-sm font-bold font-display text-white max-w-[160px] sm:max-w-xs md:max-w-md truncate">
               {problem.title}
             </h1>
             <DifficultyBadge difficulty={problem.difficulty} size="sm" />
           </div>
         </div>
 
-        {/* Center/Right: Actions (Language, AI Drawer, Run, Submit) */}
-        <div className="flex items-center gap-3">
+        {/* Center/Right: Actions (Language, AI Drawer, Run, Submit, Layout Reset) */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Reset Layout button */}
+          <button
+            onClick={handleResetLayout}
+            title="Reset workspace panels layout"
+            className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono text-slate-400 hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span className="hidden lg:inline text-[11px]">Reset Layout</span>
+          </button>
+
           {/* Language Selector */}
           <select
             value={language}
             onChange={(e) => handleLanguageChange(e.target.value)}
-            className="bg-[#14161f] border border-white/[0.1] text-xs font-medium text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-red-500/50 cursor-pointer"
+            className="bg-[#141622] border border-white/[0.1] text-xs font-mono font-medium text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-red-500/50 cursor-pointer"
           >
             {supportedLanguages.map((lang) => (
-              <option key={lang.id} value={lang.id} className="bg-[#14161f] text-slate-200">
+              <option key={lang.id} value={lang.id} className="bg-[#141622] text-slate-200">
                 {lang.label}
               </option>
             ))}
@@ -331,394 +425,253 @@ export default function WorkspacePage() {
       </header>
 
       {/* Main Split-Pane Workspace */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+      <div
+        ref={workspaceContainerRef}
+        className="flex-1 flex flex-col lg:flex-row overflow-hidden relative min-h-0"
+      >
         {/* Left Pane: Problem Details / Submissions / Hints */}
-        <div className="w-full lg:w-1/2 flex flex-col border-b lg:border-b-0 lg:border-r border-white/[0.08] bg-[#0d0e14] overflow-hidden">
-          {/* Left Tabs Bar */}
-          <div className="flex items-center gap-1 px-4 border-b border-white/[0.08] bg-[#12141c] h-10 shrink-0">
-            <button
-              onClick={() => setActiveLeftTab("description")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                activeLeftTab === "description"
-                  ? "text-white bg-white/[0.08] font-semibold"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5 text-[#ff3b3b]" />
-              <span>Description</span>
-            </button>
-
-            <button
-              onClick={() => setActiveLeftTab("submissions")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                activeLeftTab === "submissions"
-                  ? "text-white bg-white/[0.08] font-semibold"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <History className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Submissions</span>
-            </button>
-
-            {problem.hints && problem.hints.length > 0 && (
+        {!isEditorMaximized && (
+          <div
+            style={{ width: `${leftWidthPercent}%` }}
+            className="hidden lg:flex flex-col bg-[#0d0e14] overflow-hidden min-w-[280px]"
+          >
+            {/* Left Tabs Bar */}
+            <div className="flex items-center gap-1 px-4 border-b border-white/[0.08] bg-[#12141c] h-10 shrink-0 select-none">
               <button
-                onClick={() => setActiveLeftTab("hints")}
+                onClick={() => setActiveLeftTab("description")}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  activeLeftTab === "hints"
-                    ? "text-white bg-white/[0.08] font-semibold"
+                  activeLeftTab === "description"
+                    ? "text-white bg-white/[0.08] font-semibold shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
-                <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                <span>Hints ({problem.hints.length})</span>
+                <FileText className="w-3.5 h-3.5 text-[#ff3b3b]" />
+                <span>Description</span>
               </button>
-            )}
-          </div>
 
-          {/* Left Tab Content */}
-          <div className="flex-1 p-6 overflow-y-auto space-y-6 text-sm leading-relaxed text-slate-300">
-            {activeLeftTab === "description" && (
-              <>
-                {/* Description Body */}
-                <div className="space-y-4">
-                  <div className="prose prose-invert max-w-none text-xs sm:text-sm whitespace-pre-wrap">
-                    {problem.description}
+              <button
+                onClick={() => setActiveLeftTab("submissions")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  activeLeftTab === "submissions"
+                    ? "text-white bg-white/[0.08] font-semibold shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <History className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Submissions</span>
+              </button>
+
+              {problem.hints && problem.hints.length > 0 && (
+                <button
+                  onClick={() => setActiveLeftTab("hints")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    activeLeftTab === "hints"
+                      ? "text-white bg-white/[0.08] font-semibold shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Hints ({problem.hints.length})</span>
+                </button>
+              )}
+            </div>
+
+            {/* Left Tab Content */}
+            <div className="flex-1 p-6 overflow-y-auto space-y-6 text-sm leading-relaxed text-slate-300">
+              {activeLeftTab === "description" && (
+                <>
+                  {/* Description Body */}
+                  <div className="space-y-4">
+                    <div className="prose prose-invert max-w-none text-xs sm:text-sm whitespace-pre-wrap leading-relaxed">
+                      {problem.description}
+                    </div>
                   </div>
-                </div>
 
-                {/* Examples Section */}
-                {problem.examples && problem.examples.length > 0 && (
-                  <div className="space-y-3 pt-2">
-                    <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
-                      Examples
-                    </h3>
-                    <div className="space-y-3">
-                      {problem.examples.map((ex, i) => (
-                        <div
-                          key={i}
-                          className="p-3.5 rounded-xl bg-[#14161f] border border-white/[0.06] space-y-1.5 font-mono text-xs"
-                        >
-                          <p className="font-semibold text-slate-400">Example {i + 1}:</p>
-                          <p>
-                            <span className="text-slate-500">Input: </span>
-                            <span className="text-slate-200">{ex.input}</span>
-                          </p>
-                          <p>
-                            <span className="text-slate-500">Output: </span>
-                            <span className="text-emerald-400">{ex.output}</span>
-                          </p>
-                          {ex.explanation && (
-                            <p className="text-slate-400 text-[11px] font-sans pt-1">
-                              <span className="text-slate-500 font-mono">Explanation: </span>
-                              {ex.explanation}
+                  {/* Examples Section */}
+                  {problem.examples && problem.examples.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
+                        Examples
+                      </h3>
+                      <div className="space-y-3">
+                        {problem.examples.map((ex, i) => (
+                          <div
+                            key={i}
+                            className="p-3.5 rounded-xl bg-[#141620] border border-white/[0.06] space-y-2 font-mono text-xs shadow-inner"
+                          >
+                            <p className="font-semibold text-slate-300">Example {i + 1}:</p>
+                            <p>
+                              <span className="text-slate-500">Input: </span>
+                              <span className="text-slate-200">{ex.input}</span>
                             </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Constraints Section */}
-                {problem.constraints && problem.constraints.length > 0 && (
-                  <div className="space-y-2 pt-2">
-                    <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
-                      Constraints
-                    </h3>
-                    <ul className="list-disc list-inside space-y-1 text-xs font-mono text-slate-400 pl-1">
-                      {problem.constraints.map((c, i) => (
-                        <li key={i}>{c}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Tags */}
-                {problem.tags && problem.tags.length > 0 && (
-                  <div className="pt-4 border-t border-white/[0.06] flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-slate-500 font-mono">Tags:</span>
-                    {problem.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-[11px] text-slate-400 font-mono"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {activeLeftTab === "submissions" && (
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
-                  My Submission History
-                </h3>
-                {loadingHistory ? (
-                  <div className="py-8 text-center text-xs text-slate-500 font-mono animate-pulse">
-                    LOADING SUBMISSIONS...
-                  </div>
-                ) : submissionHistory.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-4">No submissions yet for this problem.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {submissionHistory.map((sub) => (
-                      <div
-                        key={sub._id}
-                        className="p-3 rounded-xl bg-[#14161f] border border-white/[0.06] flex items-center justify-between text-xs font-mono"
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <VerdictBadge verdict={sub.verdict} />
-                            <span className="text-slate-400">{sub.language}</span>
+                            <p>
+                              <span className="text-slate-500">Output: </span>
+                              <span className="text-emerald-400">{ex.output}</span>
+                            </p>
+                            {ex.explanation && (
+                              <p className="text-slate-400 text-[11px] font-sans pt-1">
+                                <span className="text-slate-500 font-mono">Explanation: </span>
+                                {ex.explanation}
+                              </p>
+                            )}
                           </div>
-                          <p className="text-[11px] text-slate-500">
-                            {new Date(sub.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="text-right text-slate-400">
-                          <p>
-                            {sub.passedTestCases}/{sub.totalTestCases} Passed
-                          </p>
-                          {sub.runtimeMs && <p className="text-[11px]">{sub.runtimeMs}ms</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeLeftTab === "hints" && (
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
-                  Problem Hints
-                </h3>
-                {problem.hints.map((hint, i) => (
-                  <div
-                    key={i}
-                    className="p-3.5 rounded-xl bg-[#14161f] border border-white/[0.06] text-xs text-slate-300 space-y-1"
-                  >
-                    <p className="font-semibold text-amber-400 font-mono">Hint {i + 1}:</p>
-                    <p>{hint}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Pane: Monaco Editor & Interactive Test Console */}
-        <div className="w-full lg:w-1/2 flex flex-col bg-[#0b0c10] overflow-hidden">
-          {/* Editor Header */}
-          <div className="h-10 px-4 border-b border-white/[0.08] bg-[#12141c] flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>solution.{language === "python" ? "py" : language === "cpp" ? "cpp" : language === "java" ? "java" : "js"}</span>
-            </div>
-
-            <button
-              onClick={handleResetCode}
-              title="Reset code template"
-              className="p-1 rounded hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Monaco Code Editor Container */}
-          <div className="flex-1 min-h-[300px]">
-            <Editor
-              height="100%"
-              language={language === "cpp" ? "cpp" : language === "java" ? "java" : language === "python" ? "python" : language === "typescript" ? "typescript" : "javascript"}
-              theme="vs-dark"
-              value={code}
-              onChange={(val) => setCode(val || "")}
-              options={{
-                fontSize: 13,
-                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                lineNumbers: "on",
-                roundedSelection: true,
-                padding: { top: 12, bottom: 12 },
-                automaticLayout: true,
-                tabSize: 2,
-              }}
-            />
-          </div>
-
-          {/* Bottom Test & Results Console */}
-          <div className="h-64 border-t border-white/[0.08] bg-[#0e1017] flex flex-col shrink-0">
-            {/* Console Tabs Bar */}
-            <div className="flex items-center justify-between px-4 border-b border-white/[0.08] bg-[#12141c] h-9">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setActiveConsoleTab("testcases")}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-colors ${
-                    activeConsoleTab === "testcases"
-                      ? "text-white bg-white/[0.08]"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  Test Cases
-                </button>
-                <button
-                  onClick={() => setActiveConsoleTab("result")}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-colors ${
-                    activeConsoleTab === "result"
-                      ? "text-white bg-white/[0.08]"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  Test Result
-                </button>
-                <button
-                  onClick={() => setActiveConsoleTab("custom")}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-colors ${
-                    activeConsoleTab === "custom"
-                      ? "text-white bg-white/[0.08]"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  Custom Input
-                </button>
-              </div>
-            </div>
-
-            {/* Console Body */}
-            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-slate-300">
-              {activeConsoleTab === "testcases" && (
-                <div className="space-y-3">
-                  {/* Test case index selector */}
-                  <div className="flex items-center gap-2">
-                    {(problem.testCases || []).map((tc, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedTestCaseIdx(idx)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                          selectedTestCaseIdx === idx
-                            ? "bg-white/[0.12] text-white"
-                            : "bg-white/[0.04] text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        Case {idx + 1}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Selected Test Case Content */}
-                  {problem.testCases?.[selectedTestCaseIdx] && (
-                    <div className="space-y-2">
-                      <div className="space-y-1">
-                        <span className="text-[11px] text-slate-500 uppercase">Input</span>
-                        <div className="p-2.5 rounded-lg bg-[#14161f] border border-white/[0.06] text-slate-200">
-                          {problem.testCases[selectedTestCaseIdx].input}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[11px] text-slate-500 uppercase">Expected Output</span>
-                        <div className="p-2.5 rounded-lg bg-[#14161f] border border-white/[0.06] text-emerald-400">
-                          {problem.testCases[selectedTestCaseIdx].expectedOutput}
-                        </div>
+                        ))}
                       </div>
                     </div>
                   )}
-                </div>
+
+                  {/* Constraints Section */}
+                  {problem.constraints && problem.constraints.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
+                        Constraints
+                      </h3>
+                      <ul className="list-disc list-inside space-y-1.5 text-xs font-mono text-slate-400 pl-1">
+                        {problem.constraints.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {problem.tags && problem.tags.length > 0 && (
+                    <div className="pt-4 border-t border-white/[0.06] flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-slate-500 font-mono">Tags:</span>
+                      {problem.tags.map((t) => (
+                        <span
+                          key={t}
+                          className="px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-[11px] text-slate-400 font-mono"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
-              {activeConsoleTab === "result" && (
-                <div>
-                  {running || submitting ? (
-                    <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
-                      <div className="w-5 h-5 rounded-full border-2 border-red-500/30 border-t-red-500 animate-spin" />
-                      <p className="text-xs">
-                        {submitting ? "Evaluating all test cases on Judge0..." : "Running code..."}
-                      </p>
+              {activeLeftTab === "submissions" && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
+                    My Submission History
+                  </h3>
+                  {loadingHistory ? (
+                    <div className="py-8 text-center text-xs text-slate-500 font-mono animate-pulse">
+                      LOADING SUBMISSIONS...
                     </div>
-                  ) : !executionResult ? (
-                    <p className="text-slate-500 py-6 text-center">
-                      Run your code or Submit to view execution verdicts.
-                    </p>
+                  ) : submissionHistory.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-4">No submissions yet for this problem.</p>
                   ) : (
-                    <div className="space-y-3">
-                      {/* Verdict Banner */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <VerdictBadge verdict={executionResult.verdict || executionResult.status} />
-                          {executionResult.firstTimeSolved && (
-                            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[11px] font-semibold border border-amber-500/30 flex items-center gap-1">
-                              <Zap className="w-3 h-3 text-amber-400" />
-                              +{executionResult.xpAwarded} XP Earned!
-                            </span>
-                          )}
+                    <div className="space-y-2">
+                      {submissionHistory.map((sub) => (
+                        <div
+                          key={sub._id}
+                          className="p-3 rounded-xl bg-[#141620] border border-white/[0.06] flex items-center justify-between text-xs font-mono"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <VerdictBadge verdict={sub.verdict} />
+                              <span className="text-slate-400">{sub.language}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              {new Date(sub.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="text-right text-slate-400">
+                            <p>
+                              {sub.passedTestCases}/{sub.totalTestCases} Passed
+                            </p>
+                            {sub.runtimeMs && <p className="text-[11px]">{sub.runtimeMs}ms</p>}
+                          </div>
                         </div>
-
-                        {executionResult.runtimeMs && (
-                          <span className="text-slate-400 text-xs flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            {executionResult.runtimeMs}ms
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Passed Test Count */}
-                      {executionResult.totalTests && (
-                        <p className="text-slate-300 text-xs">
-                          Passed:{" "}
-                          <strong className="text-white">
-                            {executionResult.passedTests} / {executionResult.totalTests}
-                          </strong>{" "}
-                          test cases
-                        </p>
-                      )}
-
-                      {/* Stdout / Stderr / Compile Error */}
-                      {executionResult.stdout && (
-                        <div className="space-y-1">
-                          <span className="text-[11px] text-slate-500 uppercase">Stdout:</span>
-                          <pre className="p-2.5 rounded-lg bg-[#14161f] border border-white/[0.06] text-slate-200 overflow-x-auto">
-                            {executionResult.stdout}
-                          </pre>
-                        </div>
-                      )}
-
-                      {executionResult.stderr && (
-                        <div className="space-y-1">
-                          <span className="text-[11px] text-red-400 uppercase">Error Output:</span>
-                          <pre className="p-2.5 rounded-lg bg-red-950/30 border border-red-500/30 text-red-300 overflow-x-auto whitespace-pre-wrap">
-                            {executionResult.stderr}
-                          </pre>
-                        </div>
-                      )}
-
-                      {executionResult.compile_output && (
-                        <div className="space-y-1">
-                          <span className="text-[11px] text-orange-400 uppercase">Compile Output:</span>
-                          <pre className="p-2.5 rounded-lg bg-orange-950/30 border border-orange-500/30 text-orange-300 overflow-x-auto whitespace-pre-wrap">
-                            {executionResult.compile_output}
-                          </pre>
-                        </div>
-                      )}
+                      ))}
                     </div>
                   )}
                 </div>
               )}
 
-              {activeConsoleTab === "custom" && (
-                <div className="space-y-2">
-                  <span className="text-[11px] text-slate-500 uppercase">Custom Input String:</span>
-                  <textarea
-                    value={customInput}
-                    onChange={(e) => setCustomInput(e.target.value)}
-                    placeholder="Enter custom stdin test input..."
-                    rows={4}
-                    className="w-full p-2.5 rounded-lg bg-[#14161f] border border-white/[0.08] text-xs font-mono text-white focus:outline-none focus:border-red-500/40 resize-none"
-                  />
+              {activeLeftTab === "hints" && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold font-mono text-white uppercase tracking-wider">
+                    Problem Hints
+                  </h3>
+                  {problem.hints.map((hint, i) => (
+                    <div
+                      key={i}
+                      className="p-3.5 rounded-xl bg-[#141620] border border-white/[0.06] text-xs text-slate-300 space-y-1"
+                    >
+                      <p className="font-semibold text-amber-400 font-mono">Hint {i + 1}:</p>
+                      <p>{hint}</p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Vertical Draggable Divider (Horizontal Split between description and editor) */}
+        {!isEditorMaximized && (
+          <div
+            onMouseDown={handleMouseDownH}
+            className="hidden lg:flex w-2 bg-[#090a0f] hover:bg-red-500/40 active:bg-red-500/60 workspace-resizer-col items-center justify-center transition-colors border-x border-white/[0.04] z-20 group"
+            title="Drag to resize panels"
+          >
+            <div className="w-0.5 h-8 bg-slate-600 rounded group-hover:bg-red-400 transition-colors" />
+          </div>
+        )}
+
+        {/* Right Pane: Monaco Code Editor & Test Console */}
+        <div
+          ref={rightPaneRef}
+          style={{ width: isEditorMaximized ? "100%" : undefined }}
+          className={`flex-1 flex flex-col bg-[#0b0c10] overflow-hidden min-w-[320px] ${
+            isEditorMaximized ? "w-full" : ""
+          }`}
+        >
+          {/* Top: Editor Panel */}
+          <WorkspaceEditor
+            language={language}
+            code={code}
+            onChange={setCode}
+            onResetCode={handleResetCode}
+            isMaximized={isEditorMaximized}
+            onToggleMaximize={() => setIsEditorMaximized(!isEditorMaximized)}
+          />
+
+          {/* Horizontal Draggable Divider (Vertical Split between editor and console) */}
+          {!isConsoleCollapsed && (
+            <div
+              onMouseDown={handleMouseDownV}
+              className="h-2 bg-[#090a0f] hover:bg-red-500/40 active:bg-red-500/60 workspace-resizer-row flex items-center justify-center transition-colors border-y border-white/[0.04] z-20 group shrink-0"
+              title="Drag to resize test console"
+            >
+              <div className="h-0.5 w-12 bg-slate-600 rounded group-hover:bg-red-400 transition-colors" />
+            </div>
+          )}
+
+          {/* Bottom: Test Cases & Execution Console */}
+          <div
+            style={{
+              height: isConsoleCollapsed ? "36px" : `${consoleHeightPx}px`,
+            }}
+            className="flex flex-col shrink-0 overflow-hidden transition-all duration-150"
+          >
+            <WorkspaceConsole
+              activeTab={activeConsoleTab}
+              setActiveTab={setActiveConsoleTab}
+              problem={problem}
+              selectedTestCaseIdx={selectedTestCaseIdx}
+              setSelectedTestCaseIdx={setSelectedTestCaseIdx}
+              customInput={customInput}
+              setCustomInput={setCustomInput}
+              running={running}
+              submitting={submitting}
+              executionResult={executionResult}
+              isCollapsed={isConsoleCollapsed}
+              onToggleCollapse={() => setIsConsoleCollapsed(!isConsoleCollapsed)}
+            />
           </div>
         </div>
 
@@ -739,4 +692,3 @@ export default function WorkspacePage() {
     </div>
   );
 }
-

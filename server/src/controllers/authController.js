@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { syncAndGetEffectiveStreak } from "../utils/streak.js";
 
 const generateToken = (id) => {
   const secret = process.env.JWT_SECRET || "brainbyte_jwt_default_secret_key";
@@ -75,6 +76,8 @@ export const login = async (req, res, next) => {
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
+
+    await syncAndGetEffectiveStreak(user);
 
     res.json({
       _id: user._id,

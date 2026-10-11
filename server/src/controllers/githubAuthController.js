@@ -2,6 +2,7 @@ import axios from "axios";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { syncAndGetEffectiveStreak } from "../utils/streak.js";
 
 
 
@@ -217,6 +218,8 @@ export const githubCallback = async (req, res) => {
     }
 
     // ── 6. Issue BrainByte JWT and redirect to frontend ───────────────────────
+    await syncAndGetEffectiveStreak(user);
+
     const token = generateToken(user._id);
 
     // Pass the token via redirect query param — frontend reads it and stores in localStorage

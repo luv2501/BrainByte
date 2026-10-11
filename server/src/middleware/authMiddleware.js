@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { syncAndGetEffectiveStreak } from "../utils/streak.js";
 
 export const protect = async (req, res, next) => {
   let token;
@@ -19,6 +20,8 @@ export const protect = async (req, res, next) => {
       if (!req.user) {
         return res.status(401).json({ message: "Not authorized, user not found" });
       }
+
+      await syncAndGetEffectiveStreak(req.user);
 
       next();
     } catch (error) {

@@ -99,7 +99,7 @@ export default function ProblemsPage() {
               <span>53 CURATED ALGORITHMIC CHALLENGES</span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
+            <h1 className="text-3xl sm:text-5xl font-extrabold font-display tracking-tight text-white leading-tight">
               Master Data Structures &amp; <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-red-400">
                 Algorithmic Thinking

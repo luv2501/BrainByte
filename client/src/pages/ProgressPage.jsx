@@ -73,7 +73,7 @@ export default function ProgressPage() {
 
               <div className="space-y-1">
                 <div className="flex items-center gap-3">
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white tracking-tight">
                     {user?.username}
                   </h1>
                   <span className="px-2.5 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-[#ff4b4b] text-xs font-mono font-semibold">

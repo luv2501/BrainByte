@@ -52,6 +52,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    longestStreak: {
+      type: Number,
+      default: 0,
+    },
     lastSolvedDate: {
       type: Date,
       default: null,

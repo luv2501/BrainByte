@@ -3,6 +3,7 @@ import Problem from "../models/Problem.js";
 import Submission from "../models/Submission.js";
 import User from "../models/User.js";
 import { runCode, evaluateSubmission } from "../services/jdoodleService.js";
+import { recordAcceptedSolveStreak, syncAndGetEffectiveStreak } from "../utils/streak.js";
 
 // @route POST /api/submissions/run
 // @desc  Quick transient code execution (no permanent DB save)
@@ -142,6 +143,8 @@ export const submitSolution = async (req, res, next) => {
     let xpAwarded = 0;
 
     // Track solved problem and award XP only on first-time Accepted
+    let updatedUserStreak = undefined;
+
     if (evaluation.verdict === "Accepted") {
       const priorAccepted = await Submission.findOne({
         user: req.user._id,
@@ -150,13 +153,13 @@ export const submitSolution = async (req, res, next) => {
         _id: { $ne: submission._id },
       });
 
-      if (!priorAccepted) {
-        firstTimeSolved = true;
-        const xpMap = { Easy: 10, Medium: 20, Hard: 30 };
-        xpAwarded = xpMap[problem.difficulty] || 10;
+      const user = await User.findById(req.user._id);
 
-        const user = await User.findById(req.user._id);
-        if (user) {
+      if (user) {
+        if (!priorAccepted) {
+          firstTimeSolved = true;
+          const xpMap = { Easy: 10, Medium: 20, Hard: 30 };
+          xpAwarded = xpMap[problem.difficulty] || 10;
           user.xp = (user.xp || 0) + xpAwarded;
 
           // Add to solvedProblems array if not present
@@ -164,17 +167,12 @@ export const submitSolution = async (req, res, next) => {
           if (!user.solvedProblems.some((id) => id.toString() === problem._id.toString())) {
             user.solvedProblems.push(problem._id);
           }
-
-          // Update streak
-          const today = new Date().toDateString();
-          const lastSolved = user.lastSolvedDate ? user.lastSolvedDate.toDateString() : null;
-          if (lastSolved !== today) {
-            user.streak = (user.streak || 0) + 1;
-            user.lastSolvedDate = new Date();
-          }
-
-          await user.save();
         }
+
+        // Update streak on any Accepted submission
+        recordAcceptedSolveStreak(user);
+        await user.save();
+        updatedUserStreak = user.streak;
       }
     }
 
@@ -183,6 +181,7 @@ export const submitSolution = async (req, res, next) => {
       evaluation,
       firstTimeSolved,
       xpAwarded,
+      streak: updatedUserStreak,
     });
   } catch (error) {
     next(error);
@@ -297,6 +296,7 @@ export const getUserStats = async (req, res, next) => {
 
     // Fetch user profile for live XP and streak
     const user = await User.findById(userId).select("xp streak lastSolvedDate");
+    const liveStreak = user ? await syncAndGetEffectiveStreak(user) : 0;
 
     res.json({
       totalSubmissions,
@@ -306,7 +306,7 @@ export const getUserStats = async (req, res, next) => {
       mediumSolved,
       hardSolved,
       xp: user?.xp || 0,
-      streak: user?.streak || 0,
+      streak: liveStreak,
     });
   } catch (error) {
     next(error);

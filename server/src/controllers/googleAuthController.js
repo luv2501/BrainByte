@@ -1,6 +1,7 @@
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { syncAndGetEffectiveStreak } from "../utils/streak.js";
 
 const generateToken = (id) => {
   const secret = process.env.JWT_SECRET || "brainbyte_jwt_default_secret_key";
@@ -82,6 +83,8 @@ export const googleAuth = async (req, res, next) => {
         });
       }
     }
+
+    await syncAndGetEffectiveStreak(user);
 
     // Return the same response shape as email/password login
     return res.status(200).json({
